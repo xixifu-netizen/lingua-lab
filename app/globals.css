@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cream: #f7f5ef;
+  --color-parchment: #efeee6;
+  --color-sage: #879b82;
+  --color-sage-deep: #6b8066;
+  --color-sage-soft: #e3e9e0;
+  --color-clay: #bd896f;
+  --color-clay-deep: #a37157;
+  --color-clay-soft: #f3e6de;
+  --color-ink: #343b35;
+  --color-ink-soft: #6a7168;
+  --color-line: #dcd9cc;
+  --color-butter: #f6e7b2;
+  --color-sky: #dceef0;
+  --color-blush: #f7e3e0;
+  --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* 字体缩放：由 FontScale 组件设置 --scale，默认 1.0 */
+:root {
+  --font-scale: 1.0;
+}
+html {
+  font-size: calc(16px * var(--font-scale));
+}
+
+::selection {
+  background: var(--color-sage-soft);
+}
