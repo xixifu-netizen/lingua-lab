@@ -104,7 +104,7 @@ export default function StudioPage() {
 
       <section className="grid md:grid-cols-2 gap-4">
         <Card>
-          <SectionTitle title="本次课材料" sub="本周主材料 · 演示数据" />
+          <SectionTitle title="本次课材料" sub="本周主材料 · 示例教材（可替换为你自己的视频）" />
           <h3 className="text-[0.88rem] font-medium text-ink">{primaryMaterial.title}</h3>
           <p className="text-[0.75rem] text-ink-soft mt-0.5">{primaryMaterial.titleZh}</p>
           <div className="flex items-center gap-2 mt-2 text-[0.75rem] text-ink-soft">

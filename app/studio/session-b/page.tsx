@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import AudioRecorder from "@/components/AudioRecorder";
+import { addSession } from "@/lib/db";
 import { Badge, Card, DemoNote, SectionTitle } from "@/components/ui";
 import {
   learner,
@@ -29,7 +31,7 @@ export default function SessionBPage() {
   >([
     {
       role: "coach",
-      text: `Hi Sylvia! Let's talk about "${topic.titleEn}". ${topic.questions[0]}`,
+      text: `Hi there! Let's talk about "${topic.titleEn}". ${topic.questions[0]}`,
     },
   ]);
   const [input, setInput] = useState("");
@@ -39,6 +41,20 @@ export default function SessionBPage() {
   const [aiSummary, setAiSummary] = useState<SummaryResult | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [finishing, setFinishing] = useState(false);
+  const router = useRouter();
+
+  async function finishB() {
+    setFinishing(true);
+    try {
+      await addSession("B", {
+        notes: aiSummary ? JSON.stringify(aiSummary).slice(0, 500) : undefined,
+      });
+    } catch {
+      // 未登录时不阻断跳转
+    }
+    router.push("/");
+  }
 
   function selectTopic(id: string) {
     setTopicId(id);
@@ -46,7 +62,7 @@ export default function SessionBPage() {
     setMessages([
       {
         role: "coach",
-        text: `Hi Sylvia! Let's talk about "${t.titleEn}". ${t.questions[0]}`,
+        text: `Hi there! Let's talk about "${t.titleEn}". ${t.questions[0]}`,
       },
     ]);
     setTurn(1);
@@ -98,7 +114,7 @@ export default function SessionBPage() {
     setSummaryLoading(true);
     setSummaryError(null);
     const conversation = messages
-      .map((m) => `${m.role === "coach" ? "Coach" : "Sylvia"}: ${m.text}`)
+      .map((m) => `${m.role === "coach" ? "Coach" : "Learner"}: ${m.text}`)
       .join("\n");
     const res = await summarize(conversation);
     setSummaryLoading(false);
@@ -501,12 +517,13 @@ export default function SessionBPage() {
           </div>
           )}
           <div className="mt-5 flex gap-3">
-            <Link
-              href="/"
-              className="px-6 py-2.5 rounded-lg bg-sage text-cream text-[0.81rem] font-medium hover:bg-sage-deep transition-colors"
+            <button
+              onClick={finishB}
+              disabled={finishing}
+              className="px-6 py-2.5 rounded-lg bg-sage text-cream text-[0.81rem] font-medium hover:bg-sage-deep transition-colors disabled:opacity-60"
             >
-              完成本周训练 · 返回首页 →
-            </Link>
+              {finishing ? "正在保存…" : "完成本周训练 · 返回首页 →"}
+            </button>
             <Link
               href="/progress"
               className="px-4 py-2.5 rounded-lg text-[0.81rem] text-ink-soft hover:bg-parchment"

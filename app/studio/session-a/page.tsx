@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import AudioRecorder from "@/components/AudioRecorder";
+import { addSession, addRecording, addProgressRows } from "@/lib/db";
 import VideoPlayer from "@/components/VideoPlayer";
 import { useVocabStore, keyOf } from "@/components/VocabStore";
 import { Badge, Card, DemoNote, ScoreBar, SectionTitle } from "@/components/ui";
@@ -12,7 +14,6 @@ import {
   sessionAVocab,
   videoTranscript,
   feedbackA1,
-  feedbackA2,
 } from "@/lib/mock-data";
 import {
   extractVocab,
@@ -30,6 +31,8 @@ const STEPS = [
 ];
 
 export default function SessionAPage() {
+  const router = useRouter();
+  const [finishing, setFinishing] = useState(false);
   const [step, setStep] = useState(0);
   const [subtitleMode, setSubtitleMode] = useState<"none" | "en">("none");
   const [notes, setNotes] = useState("");
@@ -83,10 +86,35 @@ export default function SessionAPage() {
       setAiFeedback(res.data);
       setFeedbackSource("ai");
       setAnalyzed(true);
+      // 把真实评估结果写进自己的账号（未登录时静默跳过）
+      void (async () => {
+        try {
+          const scores = res.data.scores ?? [];
+          const overall = scores.length
+            ? Math.round(scores.reduce((a, s) => a + s.value, 0) / scores.length)
+            : undefined;
+          await addRecording({ transcript, score: overall, attempt: 1 });
+          await addProgressRows(
+            scores.map((s) => ({ metric: s.label, value: s.value }))
+          );
+        } catch {
+          // 未登录 / 离线时不影响页面使用
+        }
+      })();
     } else {
       setFeedbackSource("demo");
       setAnalyzed(true);
     }
+  }
+
+  async function finishA() {
+    setFinishing(true);
+    try {
+      await addSession("A", { notes: notes.trim() || undefined });
+    } catch {
+      // 未登录时不阻断跳转
+    }
+    router.push("/studio/session-b");
   }
 
   return (
@@ -527,7 +555,7 @@ export default function SessionAPage() {
           <SectionTitle
             title="第 5 步 · 二次尝试"
             sub="带着反馈再录一遍，系统会对比两次的进步与遗留问题"
-            action={<DemoNote text="对比数据为示例" />}
+            action={<Badge tone="gray">基于你的真实记录</Badge>}
           />
 
           {/* 笔记 + AI 反馈核心要点 */}
@@ -550,14 +578,20 @@ export default function SessionAPage() {
               <p className="text-[0.8rem] font-medium text-sage-deep mb-1.5">
                 ⭐ 上次反馈的核心要点（录音前再记一遍）
               </p>
-              <ul className="space-y-1.5 text-[0.8rem] text-ink leading-relaxed">
-                {feedbackA1.topIssues.map((iss, i) => (
-                  <li key={iss.title}>
-                    <span className="text-clay-deep font-medium">{i + 1}.</span>{" "}
-                    {iss.title} —— <span className="text-ink-soft">{iss.fix}</span>
-                  </li>
-                ))}
-              </ul>
+              {(aiFeedback?.topIssues ?? []).length > 0 ? (
+                <ul className="space-y-1.5 text-[0.8rem] text-ink leading-relaxed">
+                  {(aiFeedback?.topIssues ?? []).map((iss, i) => (
+                    <li key={iss.title}>
+                      <span className="text-clay-deep font-medium">{i + 1}.</span>{" "}
+                      {iss.title} —— <span className="text-ink-soft">{iss.fix}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-[0.78rem] text-ink-soft leading-relaxed">
+                  还没有真实 AI 反馈。可返回第 4 步生成，反馈要点会自动带到这里。
+                </p>
+              )}
             </div>
           </div>
 
@@ -573,54 +607,49 @@ export default function SessionAPage() {
                 </tr>
               </thead>
               <tbody className="text-ink">
-                {feedbackA1.scores.map((s, i) => {
-                  const v2 = feedbackA2.scores[i].value;
-                  const diff = v2 - s.value;
-                  return (
+                {(aiFeedback?.scores ?? []).length > 0 ? (
+                  (aiFeedback?.scores ?? []).map((s) => (
                     <tr key={s.label} className="border-t border-line">
                       <td className="px-4 py-2.5">{s.label}</td>
                       <td className="px-4 py-2.5">{s.value}</td>
-                      <td className="px-4 py-2.5">{v2}</td>
-                      <td
-                        className={`px-4 py-2.5 font-medium ${
-                          diff >= 0 ? "text-sage-deep" : "text-clay-deep"
-                        }`}
-                      >
-                        {diff >= 0 ? `+${diff}` : diff}
-                      </td>
+                      <td className="px-4 py-2.5 text-ink-soft">—</td>
+                      <td className="px-4 py-2.5 text-ink-soft">—</td>
                     </tr>
-                  );
-                })}
+                  ))
+                ) : (
+                  <tr className="border-t border-line">
+                    <td colSpan={4} className="px-4 py-4 text-center text-ink-soft">
+                      尚无真实评估分数。完成一次 AI 反馈后，这里会显示你的六维评分。
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
           <div className="mt-4 rounded-xl border border-sage bg-sage-soft/30 p-4">
             <h4 className="text-[0.81rem] font-medium text-sage-deep">
-              本次进步
+              本次反馈要点
             </h4>
-            <ul className="mt-2 space-y-1.5 text-[0.75rem] text-ink-soft">
-              {feedbackA2.topIssues
-                .filter((x) => x.title.includes("进步") || x.title.includes("首次"))
-                .map((x) => (
-                  <li key={x.title}>· {x.title}：{x.detail}</li>
+            {(aiFeedback?.suggestions ?? []).length > 0 ? (
+              <ul className="mt-2 space-y-1.5 text-[0.75rem] text-ink-soft">
+                {(aiFeedback?.suggestions ?? []).map((s) => (
+                  <li key={s}>· {s}</li>
                 ))}
-            </ul>
-            <h4 className="text-[0.81rem] font-medium text-clay-deep mt-4">
-              仍需注意
-            </h4>
-            <ul className="mt-2 space-y-1.5 text-[0.75rem] text-ink-soft">
-              {feedbackA2.suggestions.map((s) => (
-                <li key={s}>· {s}</li>
-              ))}
-            </ul>
+              </ul>
+            ) : (
+              <p className="mt-2 text-[0.75rem] text-ink-soft leading-relaxed">
+                二次尝试的自动评分对比尚未开放。你可以先录制第二遍，系统会在后续版本支持对比。
+              </p>
+            )}
           </div>
           <div className="mt-5 flex gap-3">
-            <Link
-              href="/studio/session-b"
-              className="px-6 py-2.5 rounded-lg bg-sage text-cream text-[0.81rem] font-medium hover:bg-sage-deep transition-colors"
+            <button
+              onClick={finishA}
+              disabled={finishing}
+              className="px-6 py-2.5 rounded-lg bg-sage text-cream text-[0.81rem] font-medium hover:bg-sage-deep transition-colors disabled:opacity-60"
             >
-              完成 Session A · 去 Session B →
-            </Link>
+              {finishing ? "正在保存…" : "完成 Session A · 去 Session B →"}
+            </button>
             <Link
               href="/progress"
               className="px-4 py-2.5 rounded-lg text-[0.81rem] text-ink-soft hover:bg-parchment"
