@@ -1,6 +1,6 @@
-// Lingua Lab 演示数据
-// 注意：本文件所有内容均为视觉演示用的 mock 数据，
-// 视频链接为占位符，接入推荐服务后替换为真实可验证链接。
+// Lingua Lab 示例教材
+// 本文件保存的是教材内容（视频文稿、话题、核心好词、艾宾浩斯曲线等），
+// 不含任何用户学习记录。播放器支持粘贴视频链接 / 上传本地视频 / 浏览器语音朗读。
 
 export interface VocabItem {
   id: number;
@@ -67,13 +67,13 @@ export const primaryMaterial: Material = {
   id: 1,
   title: "Why Habits Stick — and How to Change Them",
   titleZh: "为什么习惯会固化，以及如何改变它们",
-  source: "TED 演讲（演示数据）",
+  source: "习惯主题演讲（示例教材）",
   duration: "11:24",
   difficulty: "中级偏易",
   description:
     "演讲者结合行为科学研究，解释习惯形成的回路（提示→行为→奖励），并给出改变习惯的可操作建议。语速适中，适合精听与复述。",
   objective: "练习抓取主旨与关键论据，学习描述行为模式的表达",
-  urlNote: "视频链接将在接入推荐服务后提供，当前为占位演示",
+  urlNote: "示例教材 · 可在训练中心换成你自己的视频链接或本地文件",
 };
 
 export const supplementaryMaterials: Material[] = [
@@ -81,23 +81,23 @@ export const supplementaryMaterials: Material[] = [
     id: 2,
     title: "The Science of Building Good Habits",
     titleZh: "培养好习惯的科学",
-    source: "BBC Ideas（演示数据）",
+    source: "习惯科普短片（示例教材）",
     duration: "4:58",
     difficulty: "中级偏易",
     description: "3 分钟科普短片，语速慢、画面辅助多，适合热身。",
     objective: "泛听热身，激活本周主题词汇",
-    urlNote: "视频链接将在接入推荐服务后提供，当前为占位演示",
+    urlNote: "示例教材 · 可在训练中心换成你自己的视频链接或本地文件",
   },
   {
     id: 3,
     title: "Atomic Habits: Tiny Changes, Remarkable Results",
     titleZh: "《原子习惯》作者访谈",
-    source: "播客访谈（演示数据）",
+    source: "访谈节选（示例教材）",
     duration: "18:07",
     difficulty: "中级偏难",
     description: "对话节奏快、口语化表达多，适合作为本周挑战材料。",
     objective: "挑战更快的语速与口语化表达",
-    urlNote: "视频链接将在接入推荐服务后提供，当前为占位演示",
+    urlNote: "示例教材 · 可在训练中心换成你自己的视频链接或本地文件",
   },
 ];
 
