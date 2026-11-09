@@ -10,7 +10,7 @@ import {
   type CurriculumItem,
   type TranscriptSegment,
 } from "@/lib/curriculum";
-import { recommend } from "@/lib/recommend";
+import { curriculumByCategory } from "@/lib/recommend";
 import { useAuth } from "@/components/AuthProvider";
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5];
@@ -67,9 +67,9 @@ export default function VideoPlayer() {
     } catch (e) {}
   }, []);
 
-  // 推荐排序后的素材列表
-  const recommendedList = useMemo(() => {
-    return recommend({
+  // 按板块分组的推荐列表（每板块取前 N 个未学过，练完自动补入）
+  const categorizedList = useMemo(() => {
+    return curriculumByCategory({
       profile,
       completedIds,
       isLoggedIn: !!user,
@@ -456,52 +456,63 @@ export default function VideoPlayer() {
             </div>
           )}
 
-          <div className="grid sm:grid-cols-2 gap-2">
-            {recommendedList.map(({ item, reasons, score }) => {
-              const isActive = activeItem?.id === item.id;
-              const isDone = completedIds.includes(item.id);
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => selectBuiltin(item)}
-                  className={`text-left rounded-lg border p-3 transition-colors ${
-                    isActive
-                      ? "border-sage bg-sage-soft/50"
-                      : "border-line bg-white hover:border-sage/50"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-[0.85rem]">{item.kind === "audio" ? "🎧" : "🎬"}</span>
-                    <span className="text-[0.78rem] font-medium text-ink leading-snug flex-1">
-                      {item.titleZh}
-                    </span>
-                    {isDone && (
-                      <span className="text-[0.62rem] text-clay-deep border border-clay/40 rounded px-1.5 py-0.5">
-                        已学
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 text-[0.68rem] text-ink-soft">
-                    {item.source} · {item.duration} · {item.difficulty}
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {item.tags.map((t) => (
-                      <span
-                        key={t}
-                        className="px-1.5 py-0.5 rounded bg-parchment text-[0.62rem] text-ink-soft"
+          <div className="space-y-4">
+            {categorizedList.map((cat) => (
+              <div key={cat.category}>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-[0.85rem]">{cat.icon}</span>
+                  <span className="text-[0.8rem] font-semibold text-ink">{cat.label}</span>
+                  <span className="text-[0.68rem] text-ink-soft/70">{cat.desc}</span>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {cat.items.map(({ item, reasons }) => {
+                    const isActive = activeItem?.id === item.id;
+                    const isDone = completedIds.includes(item.id);
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => selectBuiltin(item)}
+                        className={`text-left rounded-lg border p-3 transition-colors ${
+                          isActive
+                            ? "border-sage bg-sage-soft/50"
+                            : "border-line bg-white hover:border-sage/50"
+                        }`}
                       >
-                        {tagLabel(t)}
-                      </span>
-                    ))}
-                  </div>
-                  {reasons.length > 0 && (
-                    <div className="mt-1.5 text-[0.66rem] text-sage-deep leading-snug">
-                      {reasons.join(" · ")}
-                    </div>
-                  )}
-                </button>
-              );
-            })}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[0.85rem]">{item.kind === "audio" ? "🎧" : "🎬"}</span>
+                          <span className="text-[0.78rem] font-medium text-ink leading-snug flex-1">
+                            {item.titleZh}
+                          </span>
+                          {isDone && (
+                            <span className="text-[0.62rem] text-clay-deep border border-clay/40 rounded px-1.5 py-0.5">
+                              已学
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 text-[0.68rem] text-ink-soft">
+                          {item.source} · {item.duration} · {item.difficulty}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {item.tags.map((t) => (
+                            <span
+                              key={t}
+                              className="px-1.5 py-0.5 rounded bg-parchment text-[0.62rem] text-ink-soft"
+                            >
+                              {tagLabel(t)}
+                            </span>
+                          ))}
+                        </div>
+                        {reasons.length > 0 && (
+                          <div className="mt-1.5 text-[0.66rem] text-sage-deep leading-snug">
+                            {reasons.join(" · ")}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
