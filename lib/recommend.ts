@@ -1,12 +1,18 @@
 // 智能推荐引擎
 // 根据用户水平（profile.level）和兴趣（profile.interests）对素材打分排序。
 // 已学过的素材降权，优先推荐既匹配水平、又命中兴趣的素材。
+//
+// 「流动」机制：素材按板块（演讲/生活场景对话/其他）分组，每个板块维护
+// 一个"当前展示列表"，练完一个会从未展示的池子里补入新的同类素材。
 
 import {
+  CATEGORIES,
   curriculum,
   LEVEL_RANK,
+  VISIBLE_PER_CATEGORY,
   type CurriculumItem,
   type InterestId,
+  type MaterialCategory,
 } from "@/lib/curriculum";
 
 export interface UserProfile {
@@ -92,4 +98,34 @@ export function recommendedCurriculum(options: RecommendOptions = {}): Curriculu
 export function reasonFor(itemId: string, options: RecommendOptions = {}): string {
   const r = recommend(options).find((x) => x.item.id === itemId);
   return r?.reasons.join(" · ") ?? "";
+}
+
+/**
+ * 按板块分组的展示列表。
+ * 每个板块取排序后的前 N 个"未学过"的素材；若不足 N，则用已学过的补齐。
+ * 这样练完一个，未展示的池内素材会自动顶上来 → 素材库"流动"起来。
+ */
+export function curriculumByCategory(
+  options: RecommendOptions = {}
+): { category: MaterialCategory; label: string; icon: string; desc: string; items: RecommendResult[] }[] {
+  const ranked = recommend(options);
+  const completed = new Set(options.completedIds ?? []);
+
+  return CATEGORIES.map((cat) => {
+    // 该板块内：先按推荐排序
+    const catResults = ranked.filter((r) => r.item.category === cat.id);
+    // 未学过优先
+    const fresh = catResults.filter((r) => !completed.has(r.item.id));
+    const done = catResults.filter((r) => completed.has(r.item.id));
+    // 取前 VISIBLE_PER_CATEGORY 个：优先未学过，不足再补已学过
+    const merged = [...fresh, ...done].slice(0, VISIBLE_PER_CATEGORY);
+
+    return {
+      category: cat.id,
+      label: cat.label,
+      icon: cat.icon,
+      desc: cat.desc,
+      items: merged,
+    };
+  });
 }
