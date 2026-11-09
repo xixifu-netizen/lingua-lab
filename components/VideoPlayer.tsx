@@ -1,13 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SelectionCollector from "@/components/SelectionCollector";
 import {
   curriculum,
   embedUrlOf,
+  tagLabel,
+  INTEREST_CATEGORIES,
   type CurriculumItem,
   type TranscriptSegment,
 } from "@/lib/curriculum";
+import { recommend } from "@/lib/recommend";
+import { useAuth } from "@/components/AuthProvider";
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5];
 
@@ -49,7 +53,28 @@ export default function VideoPlayer() {
   const [localSource, setLocalSource] = useState<LocalSource>(null);
   const [inputUrl, setInputUrl] = useState("");
   const [showSourcePanel, setShowSourcePanel] = useState(false);
+  const [showInterests, setShowInterests] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
+  const [completedIds, setCompletedIds] = useState<string[]>([]);
+
+  const { user, profile, updateInterests } = useAuth();
+
+  // 从 localStorage 读取已学过的素材（跨会话保留）
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("ll-completed-materials");
+      if (raw) setCompletedIds(JSON.parse(raw));
+    } catch (e) {}
+  }, []);
+
+  // 推荐排序后的素材列表
+  const recommendedList = useMemo(() => {
+    return recommend({
+      profile,
+      completedIds,
+      isLoggedIn: !!user,
+    });
+  }, [profile, completedIds, user]);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -143,6 +168,26 @@ export default function VideoPlayer() {
     setActiveItem(item);
     setSourceError(null);
     setShowLibrary(false);
+    // 标记为已学过（用于推荐降权，避免重复推荐）
+    markCompleted(item.id);
+  }
+
+  function markCompleted(id: string) {
+    setCompletedIds((prev) => {
+      if (prev.includes(id)) return prev;
+      const next = [...prev, id];
+      try {
+        localStorage.setItem("ll-completed-materials", JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+  }
+
+  function toggleInterest(id: string) {
+    const cur = new Set(profile?.interests ?? []);
+    if (cur.has(id)) cur.delete(id);
+    else cur.add(id);
+    void updateInterests(Array.from(cur));
   }
 
   function selectLocal(src: LocalSource) {
@@ -363,12 +408,58 @@ export default function VideoPlayer() {
 
       {showLibrary && (
         <div className="px-4 py-3 bg-white/70 border-b border-line">
-          <p className="text-[0.72rem] text-ink-soft mb-2">
-            内置精选素材：音频可随播放自动高亮文稿；视频（TED / YouTube）嵌入播放，文稿点击定位。
-          </p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[0.72rem] text-ink-soft">
+              {user
+                ? profile?.interests?.length
+                  ? "已按你的水平和兴趣智能排序"
+                  : "已按你的水平排序（点右侧设置兴趣，推荐更精准）"
+                : "登录后可按你的水平与兴趣智能推荐"}
+            </p>
+            <button
+              onClick={() => setShowInterests((s) => !s)}
+              className="text-[0.7rem] text-sage-deep hover:underline shrink-0"
+            >
+              {showInterests ? "收起" : "🎯 我的兴趣"}
+            </button>
+          </div>
+
+          {showInterests && (
+            <div className="mb-3 p-3 rounded-lg border border-sage/30 bg-sage-soft/20">
+              <p className="text-[0.7rem] text-ink-soft mb-2">
+                勾选你感兴趣的主题，推荐会优先匹配：
+              </p>
+              {user ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {INTEREST_CATEGORIES.map((c) => {
+                    const on = (profile?.interests ?? []).includes(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => toggleInterest(c.id)}
+                        className={`px-2.5 py-1 rounded-full text-[0.7rem] transition-colors ${
+                          on
+                            ? "bg-sage text-cream font-medium"
+                            : "bg-parchment text-ink-soft hover:bg-sage-soft"
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-[0.7rem] text-clay-deep">
+                  请先登录，才能保存兴趣偏好。
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="grid sm:grid-cols-2 gap-2">
-            {curriculum.map((item) => {
+            {recommendedList.map(({ item, reasons, score }) => {
               const isActive = activeItem?.id === item.id;
+              const isDone = completedIds.includes(item.id);
               return (
                 <button
                   key={item.id}
@@ -384,13 +475,30 @@ export default function VideoPlayer() {
                     <span className="text-[0.78rem] font-medium text-ink leading-snug flex-1">
                       {item.titleZh}
                     </span>
+                    {isDone && (
+                      <span className="text-[0.62rem] text-clay-deep border border-clay/40 rounded px-1.5 py-0.5">
+                        已学
+                      </span>
+                    )}
                   </div>
                   <div className="mt-1 text-[0.68rem] text-ink-soft">
                     {item.source} · {item.duration} · {item.difficulty}
                   </div>
-                  <div className="mt-1 text-[0.68rem] text-ink-soft/70">
-                    {item.kind === "audio" ? "自动高亮文稿" : "点击定位文稿"}
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {item.tags.map((t) => (
+                      <span
+                        key={t}
+                        className="px-1.5 py-0.5 rounded bg-parchment text-[0.62rem] text-ink-soft"
+                      >
+                        {tagLabel(t)}
+                      </span>
+                    ))}
                   </div>
+                  {reasons.length > 0 && (
+                    <div className="mt-1.5 text-[0.66rem] text-sage-deep leading-snug">
+                      {reasons.join(" · ")}
+                    </div>
+                  )}
                 </button>
               );
             })}
