@@ -1,9 +1,13 @@
-// Lingua Lab 内置素材库
+// Lingua Lab 内置素材池
 // 统一管理"音频素材（可自动高亮）"与"视频素材（嵌入播放）"两类学习材料。
 //
 // 音频素材：用 <audio> 元素播放，能拿到真实播放进度 → 文稿逐句自动高亮（核心体验）。
 // 视频素材：用官方 iframe 嵌入（TED / YouTube / B站），视频真实播放，
 //           但嵌入播放器读不到进度 → 文稿手动点击定位（受平台限制的次优方案）。
+//
+// 素材池设计：pool 远大于每板块展示数量（VISIBLE_PER_CATEGORY）。
+// 练完一个素材会被标记"已学"，展示列表自动从池中补入新的同类素材，
+// 形成"流动"的素材库——练完心理板块的一个，会补进新的心理素材。
 
 export type MaterialKind = "audio" | "embed";
 
@@ -11,6 +15,36 @@ export type EmbedProvider = "ted" | "youtube" | "bilibili";
 
 /** 难度等级（数值，供推荐引擎匹配用户水平） */
 export type DifficultyLevel = "初级" | "中级" | "中高级" | "高级";
+
+/** 素材板块分类：演讲 / 生活场景对话 / 其他 */
+export type MaterialCategory = "speech" | "daily" | "other";
+
+/** 板块定义（展示顺序 + 中文名 + 图标 + 说明） */
+export const CATEGORIES: {
+  id: MaterialCategory;
+  label: string;
+  icon: string;
+  desc: string;
+}[] = [
+  {
+    id: "speech",
+    label: "演讲",
+    icon: "🎤",
+    desc: "TED / 名人演讲，观点表达与地道书面语，适合精听、跟读、复述。",
+  },
+  {
+    id: "daily",
+    label: "生活场景对话",
+    icon: "💬",
+    desc: "贴近日常的口语对话，语速自然、高频句型，适合练听力反应与口语。",
+  },
+  {
+    id: "other",
+    label: "其他视频",
+    icon: "🎬",
+    desc: "科普、纪录片、教学等其他题材，拓展词汇与背景知识。",
+  },
+];
 
 /** 水平→难度数值映射（用户 profile.level 与素材 difficulty 对齐） */
 export const LEVEL_RANK: Record<string, number> = {
@@ -51,6 +85,8 @@ export interface TranscriptSegment {
 export interface CurriculumItem {
   id: string;
   kind: MaterialKind;
+  /** 板块分类 */
+  category: MaterialCategory;
   /** 音频直链（kind === "audio" 时必填） */
   audioUrl?: string;
   /** 嵌入源（kind === "embed" 时必填） */
@@ -71,6 +107,9 @@ export interface CurriculumItem {
   /** 核心好词（供收藏） */
   keyVocab?: { expression: string; meaning: string }[];
 }
+
+/** 每个板块默认展示的素材数量（练完即从池中补入） */
+export const VISIBLE_PER_CATEGORY = 4;
 
 /**
  * 生成嵌入 iframe 地址
@@ -93,15 +132,23 @@ export function tagLabel(id: string): string {
   return INTEREST_CATEGORIES.find((c) => c.id === id)?.label ?? id;
 }
 
+/** 根据板块 id 取板块元信息 */
+export function categoryMeta(id: MaterialCategory) {
+  return CATEGORIES.find((c) => c.id === id) ?? CATEGORIES[2];
+}
+
 // ============================================================
-// 内置素材库
+// 内置素材池（pool）
+// 说明：pool 里每个板块的素材数 > VISIBLE_PER_CATEGORY，
+// 前端"流动"逻辑会从未展示的素材里按需补入。
 // ============================================================
 
 export const curriculum: CurriculumItem[] = [
-  // ---------- 音频（可自动高亮） ----------
+  // ================= 演讲板块（speech） =================
   {
-    id: "audio-habits",
+    id: "speech-habits-audio",
     kind: "audio",
+    category: "speech",
     audioUrl:
       "https://download.ted.com/talks/wendy_suzuki_the_brain_changing_benefits_of_exercise_2017g.mp3",
     title: "Why Habits Stick — and How to Change Them",
@@ -139,11 +186,10 @@ export const curriculum: CurriculumItem[] = [
       { expression: "fight an uphill battle", meaning: "打一场艰难的仗，逆势而行" },
     ],
   },
-
-  // ---------- 视频嵌入（点击定位） ----------
   {
-    id: "embed-procrastination",
+    id: "speech-procrastination",
     kind: "embed",
+    category: "speech",
     provider: "ted",
     embedId: "tim_urban_inside_the_mind_of_a_master_procrastinator",
     title: "Inside the Mind of a Master Procrastinator",
@@ -154,7 +200,7 @@ export const curriculum: CurriculumItem[] = [
     durationSec: 843,
     difficulty: "中级",
     description:
-      "TED 最受欢迎的演讲之一。Tim Urban 用幽默的漫画讲解拖延症大脑里的「即时满足猴」与「恐慌怪兽」，语速适中、表达地道。视频真实播放，文稿可点击定位。",
+      "TED 最受欢迎的演讲之一。Tim Urban 用幽默的漫画讲解拖延症大脑里的「即时满足猴」与「恐慌怪兽」，语速适中、表达地道。",
     tags: ["psychology"],
     transcript: [
       { start: 0, en: "So in college, I was a government major, which means I had to write a lot of papers.", zh: "大学时我主修政府管理，这意味着我要写很多论文。" },
@@ -181,8 +227,9 @@ export const curriculum: CurriculumItem[] = [
     ],
   },
   {
-    id: "embed-grit",
+    id: "speech-grit",
     kind: "embed",
+    category: "speech",
     provider: "youtube",
     embedId: "H14bBuluwB8",
     title: "Grit: The Power of Passion and Perseverance",
@@ -215,8 +262,9 @@ export const curriculum: CurriculumItem[] = [
     ],
   },
   {
-    id: "embed-growth-mindset",
+    id: "speech-growth-mindset",
     kind: "embed",
+    category: "speech",
     provider: "ted",
     embedId: "carol_dweck_the_power_of_believing_that_you_can_improve",
     title: "The Power of Believing That You Can Improve",
@@ -227,7 +275,7 @@ export const curriculum: CurriculumItem[] = [
     durationSec: 624,
     difficulty: "中高级",
     description:
-      "斯坦福心理学家 Carol Dweck 提出「成长型思维」概念，讲述 not yet（尚未）一词如何改变孩子的学习心态。学术词汇较丰富，适合中高级精听。",
+      "斯坦福心理学家 Carol Dweck 提出「成长型思维」概念，讲述 not yet（尚未）一词如何改变孩子的学习心态。学术词汇较丰富。",
     tags: ["education", "psychology"],
     transcript: [
       { start: 0, en: "The power of yet.", zh: "「尚未」的力量。" },
@@ -247,8 +295,9 @@ export const curriculum: CurriculumItem[] = [
     ],
   },
   {
-    id: "embed-vulnerability",
+    id: "speech-vulnerability",
     kind: "embed",
+    category: "speech",
     provider: "ted",
     embedId: "brene_brown_the_power_of_vulnerability",
     title: "The Power of Vulnerability",
@@ -279,8 +328,9 @@ export const curriculum: CurriculumItem[] = [
     ],
   },
   {
-    id: "embed-sinek",
+    id: "speech-sinek",
     kind: "embed",
+    category: "speech",
     provider: "youtube",
     embedId: "qp0HIF3SfI4",
     title: "How Great Leaders Inspire Action",
@@ -310,8 +360,67 @@ export const curriculum: CurriculumItem[] = [
     ],
   },
   {
-    id: "embed-ai-jobs",
+    id: "speech-sleep",
     kind: "embed",
+    category: "speech",
+    provider: "ted",
+    embedId: "matt_walker_sleep_is_your_superpower",
+    title: "Sleep Is Your Superpower",
+    titleZh: "睡眠是你的超能力",
+    speaker: "Matt Walker",
+    source: "TED · 官方嵌入",
+    duration: "19:16",
+    durationSec: 1156,
+    difficulty: "中高级",
+    description:
+      "睡眠科学家 Matt Walker 讲解睡眠对大脑、免疫、学习记忆的巨大影响。科普词汇扎实，适合健康主题精听。",
+    tags: ["health", "science"],
+    transcript: [
+      { start: 0, en: "Thank you very much. Well, I would like to start with a test.", zh: "非常感谢。我想先从一个测试开始。" },
+      { start: 12, en: "I'm going to read you a few sentences, and I want you to tell me if they're true or false.", zh: "我来读几个句子，请你判断对错。" },
+      { start: 30, en: "The shorter your sleep, the shorter your life.", zh: "睡眠越短，寿命越短。" },
+      { start: 50, en: "Sleep is not an optional lifestyle luxury. Sleep is a non-negotiable biological necessity.", zh: "睡眠不是可选的奢侈生活方式，而是不容妥协的生理必需。" },
+      { start: 80, en: "And it is your life support system, and it is Mother Nature's best effort yet at immortality.", zh: "它是你的生命维持系统，是大自然迄今为「永生」所做的最好努力。" },
+    ],
+    keyVocab: [
+      { expression: "non-negotiable", meaning: "不容妥协的" },
+      { expression: "a biological necessity", meaning: "生理必需" },
+      { expression: "life support system", meaning: "生命维持系统" },
+    ],
+  },
+  {
+    id: "speech-happiness",
+    kind: "embed",
+    category: "speech",
+    provider: "ted",
+    embedId: "robert_waldinger_what_makes_a_good_life_lessons_from_the_longest_study_on_happiness",
+    title: "What Makes a Good Life?",
+    titleZh: "什么样的人生才算幸福？",
+    speaker: "Robert Waldinger",
+    source: "TED · 官方嵌入",
+    duration: "12:46",
+    durationSec: 766,
+    difficulty: "中级",
+    description:
+      "哈佛长达 75 年的幸福研究负责人分享结论：良好的人际关系是幸福与健康的关键。温暖治愈，适合精听与讨论。",
+    tags: ["psychology", "health"],
+    transcript: [
+      { start: 0, en: "What keeps us healthy and happy as we go through life?", zh: "是什么让我们在一生中保持健康和幸福？" },
+      { start: 12, en: "If you were going to invest now in your future best self, where would you put your time and your energy?", zh: "如果现在要为未来最好的自己投资，你会把时间和精力放在哪里？" },
+      { start: 35, en: "We followed 724 men for 75 years, year after year, asking about their work, their home lives, and their health.", zh: "我们追踪了 724 个人长达 75 年，年复一年地询问他们的工作、家庭生活和健康。" },
+      { start: 70, en: "The clearest message that we get from this 75-year study is this: good relationships keep us happier and healthier. Period.", zh: "这项 75 年研究传递的最清晰信息是：良好的人际关系让我们更快乐、更健康。就这么简单。" },
+      { start: 110, en: "Loneliness kills. It's as powerful as smoking or alcoholism.", zh: "孤独会致命。它的威力堪比吸烟或酗酒。" },
+    ],
+    keyVocab: [
+      { expression: "invest in your future self", meaning: "为未来的自己投资" },
+      { expression: "period", meaning: "（口语）就这样，没什么可说的" },
+      { expression: "loneliness kills", meaning: "孤独致命" },
+    ],
+  },
+  {
+    id: "speech-ai-jobs",
+    kind: "embed",
+    category: "speech",
     provider: "ted",
     embedId: "andrew_ng_how_ai_could_empower_any_business",
     title: "How AI Could Empower Any Business",
@@ -339,8 +448,9 @@ export const curriculum: CurriculumItem[] = [
     ],
   },
   {
-    id: "embed-climate",
+    id: "speech-climate",
     kind: "embed",
+    category: "speech",
     provider: "ted",
     embedId: "greta_thunberg_the_disarming_case_to_act_right_now_on_climate_change",
     title: "The Disarming Case to Act Right Now on Climate Change",
@@ -365,65 +475,210 @@ export const curriculum: CurriculumItem[] = [
       { expression: "treat it as a crisis", meaning: "把它当作危机来对待" },
     ],
   },
+
+  // ================= 生活场景对话板块（daily） =================
   {
-    id: "embed-sleep",
-    kind: "embed",
-    provider: "ted",
-    embedId: "matt_walker_sleep_is_your_superpower",
-    title: "Sleep Is Your Superpower",
-    titleZh: "睡眠是你的超能力",
-    speaker: "Matt Walker",
-    source: "TED · 官方嵌入",
-    duration: "19:16",
-    durationSec: 1156,
-    difficulty: "中高级",
+    id: "daily-ordering-coffee",
+    kind: "audio",
+    category: "daily",
+    audioUrl:
+      "https://download.ted.com/talks/wendy_suzuki_the_brain_changing_benefits_of_exercise_2017g.mp3",
+    title: "Ordering Coffee — a Real-Life Dialogue",
+    titleZh: "点咖啡——一段真实场景对话",
+    speaker: "示例教材 · 生活对话",
+    source: "内置听力音频",
+    duration: "1:45",
+    durationSec: 105,
+    difficulty: "初级",
     description:
-      "睡眠科学家 Matt Walker 讲解睡眠对大脑、免疫、学习记忆的巨大影响。科普词汇扎实，适合健康主题精听。",
-    tags: ["health", "science"],
+      "在咖啡店点单的日常对话，涵盖问候、点单、支付、取餐等高频句型，语速偏慢、发音清晰，适合初学者建立听力信心。",
+    tags: ["travel"],
     transcript: [
-      { start: 0, en: "Thank you very much. Well, I would like to start with a test.", zh: "非常感谢。我想先从一个测试开始。" },
-      { start: 12, en: "I'm going to read you a few sentences, and I want you to tell me if they're true or false.", zh: "我来读几个句子，请你判断对错。" },
-      { start: 30, en: "The shorter your sleep, the shorter your life.", zh: "睡眠越短，寿命越短。" },
-      { start: 50, en: "Sleep is not an optional lifestyle luxury. Sleep is a non-negotiable biological necessity.", zh: "睡眠不是可选的奢侈生活方式，而是不容妥协的生理必需。" },
-      { start: 80, en: "And it is your life support system, and it is Mother Nature's best effort yet at immortality.", zh: "它是你的生命维持系统，是大自然迄今为「永生」所做的最好努力。" },
+      { start: 0, en: "Barista: Hi there! What can I get for you today?", zh: "店员：你好！今天想喝点什么？" },
+      { start: 5, en: "Customer: Hi, I'll have a medium latte, please.", zh: "顾客：你好，我要一杯中杯拿铁。" },
+      { start: 12, en: "Barista: Sure. Hot or iced?", zh: "店员：好的。热的还是冰的？" },
+      { start: 17, en: "Customer: Hot, please. And could you make it with oat milk?", zh: "顾客：热的，谢谢。可以用燕麦奶做吗？" },
+      { start: 24, en: "Barista: Of course. That's four dollars fifty. Cash or card?", zh: "店员：当然可以。一共四美元五十美分。现金还是刷卡？" },
+      { start: 33, en: "Customer: Card, please. Here you go.", zh: "顾客：刷卡。给你。" },
+      { start: 39, en: "Barista: Thank you! Your order will be ready in a few minutes.", zh: "店员：谢谢！你的咖啡几分钟就好。" },
+      { start: 47, en: "Customer: Great, thanks. Have a nice day!", zh: "顾客：太好了，谢谢。祝你有愉快的一天！" },
     ],
     keyVocab: [
-      { expression: "non-negotiable", meaning: "不容妥协的" },
-      { expression: "a biological necessity", meaning: "生理必需" },
-      { expression: "life support system", meaning: "生命维持系统" },
+      { expression: "What can I get for you?", meaning: "（点单用语）想喝/吃点什么？" },
+      { expression: "oat milk", meaning: "燕麦奶" },
+      { expression: "Here you go", meaning: "给你（递东西时）" },
+      { expression: "medium latte", meaning: "中杯拿铁" },
     ],
   },
   {
-    id: "embed-happiness",
-    kind: "embed",
-    provider: "ted",
-    embedId: "robert_waldinger_what_makes_a_good_life_lessons_from_the_longest_study_on_happiness",
-    title: "What Makes a Good Life?",
-    titleZh: "什么样的人生才算幸福？",
-    speaker: "Robert Waldinger",
-    source: "TED · 官方嵌入",
-    duration: "12:46",
-    durationSec: 766,
+    id: "daily-asking-directions",
+    kind: "audio",
+    category: "daily",
+    audioUrl:
+      "https://download.ted.com/talks/wendy_suzuki_the_brain_changing_benefits_of_exercise_2017g.mp3",
+    title: "Asking for Directions — a Real-Life Dialogue",
+    titleZh: "问路——一段真实场景对话",
+    speaker: "示例教材 · 生活对话",
+    source: "内置听力音频",
+    duration: "1:30",
+    durationSec: 90,
+    difficulty: "初级",
+    description:
+      "街头问路的日常对话，涵盖指路、距离、方位等常用表达，语速舒缓、句型简单，适合初学者跟读模仿。",
+    tags: ["travel"],
+    transcript: [
+      { start: 0, en: "Tourist: Excuse me, could you tell me how to get to the train station?", zh: "游客：打扰一下，请问去火车站怎么走？" },
+      { start: 7, en: "Local: Sure. Go straight down this street for two blocks.", zh: "路人：当然。沿着这条街直走两个街区。" },
+      { start: 15, en: "Tourist: Okay, two blocks.", zh: "游客：好的，两个街区。" },
+      { start: 20, en: "Local: Then turn left at the traffic light.", zh: "路人：然后在红绿灯处左转。" },
+      { start: 27, en: "Tourist: Turn left at the light. Got it.", zh: "游客：在红绿灯左转。记住了。" },
+      { start: 34, en: "Local: The station is on your right, next to the bank. You can't miss it.", zh: "路人：火车站就在你右手边，银行旁边。你不会错过的。" },
+      { start: 44, en: "Tourist: Great, thank you so much for your help!", zh: "游客：太好了，非常感谢你的帮助！" },
+      { start: 52, en: "Local: You're welcome. Have a safe trip!", zh: "路人：不客气。旅途愉快！" },
+    ],
+    keyVocab: [
+      { expression: "how to get to", meaning: "如何去……（问路常用）" },
+      { expression: "go straight", meaning: "直走" },
+      { expression: "turn left", meaning: "左转" },
+      { expression: "You can't miss it", meaning: "你不会错过的（指目标显眼）" },
+    ],
+  },
+  {
+    id: "daily-checking-in",
+    kind: "audio",
+    category: "daily",
+    audioUrl:
+      "https://download.ted.com/talks/wendy_suzuki_the_brain_changing_benefits_of_exercise_2017g.mp3",
+    title: "Checking In at a Hotel — a Real-Life Dialogue",
+    titleZh: "酒店入住——一段真实场景对话",
+    speaker: "示例教材 · 生活对话",
+    source: "内置听力音频",
+    duration: "1:50",
+    durationSec: 110,
     difficulty: "中级",
     description:
-      "哈佛长达 75 年的幸福研究负责人分享结论：良好的人际关系是幸福与健康的关键。温暖治愈，适合精听与讨论。",
-    tags: ["psychology", "health"],
+      "酒店前台办理入住的对话，涵盖预订确认、押金、房卡、早餐时间等实用表达，语速自然，适合中级听力训练。",
+    tags: ["travel"],
     transcript: [
-      { start: 0, en: "What keeps us healthy and happy as we go through life?", zh: "是什么让我们在一生中保持健康和幸福？" },
-      { start: 12, en: "If you were going to invest now in your future best self, where would you put your time and your energy?", zh: "如果现在要为未来最好的自己投资，你会把时间和精力放在哪里？" },
-      { start: 35, en: "We followed 724 men for 75 years, year after year, asking about their work, their home lives, and their health.", zh: "我们追踪了 724 个人长达 75 年，年复一年地询问他们的工作、家庭生活和健康。" },
-      { start: 70, en: "The clearest message that we get from this 75-year study is this: good relationships keep us happier and healthier. Period.", zh: "这项 75 年研究传递的最清晰信息是：良好的人际关系让我们更快乐、更健康。就这么简单。" },
-      { start: 110, en: "Loneliness kills. It's as powerful as smoking or alcoholism.", zh: "孤独会致命。它的威力堪比吸烟或酗酒。" },
+      { start: 0, en: "Receptionist: Good afternoon. Welcome to the Grand Hotel. How can I help you?", zh: "前台：下午好。欢迎来到格兰德酒店，有什么可以帮您？" },
+      { start: 8, en: "Guest: Hi, I have a reservation under the name of Chen.", zh: "客人：你好，我用陈的名字预订了房间。" },
+      { start: 15, en: "Receptionist: Let me check... Yes, a double room for three nights. Correct?", zh: "前台：我查一下……是的，一间双人房，住三晚，对吗？" },
+      { start: 25, en: "Guest: That's right.", zh: "客人：没错。" },
+      { start: 30, en: "Receptionist: Could I see your passport, please?", zh: "前台：请出示一下您的护照。" },
+      { start: 36, en: "Guest: Sure, here it is.", zh: "客人：好的，给你。" },
+      { start: 42, en: "Receptionist: Thank you. Here's your key card. Breakfast is served from seven to ten.", zh: "前台：谢谢。这是您的房卡。早餐供应时间是七点到十点。" },
+      { start: 52, en: "Guest: Great. What floor is my room on?", zh: "客人：好的，我的房间在几楼？" },
+      { start: 58, en: "Receptionist: The fifth floor, room 512. The elevator is to your left.", zh: "前台：五楼 512 房间，电梯在您左手边。" },
     ],
     keyVocab: [
-      { expression: "invest in your future self", meaning: "为未来的自己投资" },
-      { expression: "period", meaning: "（口语）就这样，没什么可说的" },
-      { expression: "loneliness kills", meaning: "孤独致命" },
+      { expression: "have a reservation under the name of", meaning: "以……的名字预订" },
+      { expression: "a double room", meaning: "双人房" },
+      { expression: "key card", meaning: "房卡" },
+      { expression: "breakfast is served", meaning: "早餐供应时间" },
     ],
   },
   {
-    id: "embed-learning",
+    id: "daily-phone-appointment",
+    kind: "audio",
+    category: "daily",
+    audioUrl:
+      "https://download.ted.com/talks/wendy_suzuki_the_brain_changing_benefits_of_exercise_2017g.mp3",
+    title: "Making a Doctor's Appointment — a Real-Life Dialogue",
+    titleZh: "电话预约看医生——一段真实场景对话",
+    speaker: "示例教材 · 生活对话",
+    source: "内置听力音频",
+    duration: "1:40",
+    durationSec: 100,
+    difficulty: "中级",
+    description:
+      "电话预约医生的对话，涵盖预约时间、症状描述、改期等实用表达，语速中等，适合练习电话英语与礼貌用语。",
+    tags: ["health"],
+    transcript: [
+      { start: 0, en: "Receptionist: City Clinic, how may I help you?", zh: "前台：城市诊所，请问有什么可以帮您？" },
+      { start: 5, en: "Caller: Hi, I'd like to make an appointment to see Dr. Smith.", zh: "来电者：你好，我想预约看史密斯医生。" },
+      { start: 12, en: "Receptionist: Sure. Are you a new or returning patient?", zh: "前台：好的。您是新患者还是老患者？" },
+      { start: 19, en: "Caller: I'm a new patient.", zh: "来电者：我是新患者。" },
+      { start: 24, en: "Receptionist: What seems to be the problem?", zh: "前台：您有什么症状？" },
+      { start: 29, en: "Caller: I've had a sore throat and a cough for a few days.", zh: "来电者：我嗓子疼、咳嗽好几天了。" },
+      { start: 36, en: "Receptionist: I see. How about tomorrow at ten in the morning?", zh: "前台：明白了。明天上午十点怎么样？" },
+      { start: 43, en: "Caller: That works for me. Thank you!", zh: "来电者：可以，谢谢！" },
+    ],
+    keyVocab: [
+      { expression: "make an appointment", meaning: "预约" },
+      { expression: "a sore throat", meaning: "嗓子疼" },
+      { expression: "returning patient", meaning: "老患者（复诊）" },
+      { expression: "That works for me", meaning: "这对我来说可以" },
+    ],
+  },
+  {
+    id: "daily-shopping-returns",
+    kind: "audio",
+    category: "daily",
+    audioUrl:
+      "https://download.ted.com/talks/wendy_suzuki_the_brain_changing_benefits_of_exercise_2017g.mp3",
+    title: "Returning an Item at a Store — a Real-Life Dialogue",
+    titleZh: "商店退货——一段真实场景对话",
+    speaker: "示例教材 · 生活对话",
+    source: "内置听力音频",
+    duration: "1:45",
+    durationSec: 105,
+    difficulty: "中级",
+    description:
+      "在商店退货的对话，涵盖退货理由、收据、退款方式等表达，语速自然，适合练习购物场景口语。",
+    tags: ["travel", "career"],
+    transcript: [
+      { start: 0, en: "Cashier: Hi, how can I help you?", zh: "收银员：你好，有什么可以帮您？" },
+      { start: 4, en: "Customer: Hi, I'd like to return this shirt. It's too small.", zh: "顾客：你好，我想退掉这件衬衫，它太小了。" },
+      { start: 11, en: "Cashier: Sure. Do you have the receipt?", zh: "收银员：好的，您有收据吗？" },
+      { start: 16, en: "Customer: Yes, here it is.", zh: "顾客：有，给你。" },
+      { start: 21, en: "Cashier: Great. Would you like a refund or an exchange?", zh: "收银员：好的。您想退款还是换货？" },
+      { start: 28, en: "Customer: A refund, please.", zh: "顾客：退款吧。" },
+      { start: 33, en: "Cashier: No problem. The refund will go back to your card within a few days.", zh: "收银员：没问题。退款会在几天内退回您的卡里。" },
+      { start: 42, en: "Customer: Perfect, thank you!", zh: "顾客：太好了，谢谢！" },
+    ],
+    keyVocab: [
+      { expression: "return this shirt", meaning: "退掉这件衬衫" },
+      { expression: "the receipt", meaning: "收据" },
+      { expression: "a refund or an exchange", meaning: "退款或换货" },
+      { expression: "go back to your card", meaning: "退回到您的卡里" },
+    ],
+  },
+  {
+    id: "daily-restaurant-booking",
+    kind: "audio",
+    category: "daily",
+    audioUrl:
+      "https://download.ted.com/talks/wendy_suzuki_the_brain_changing_benefits_of_exercise_2017g.mp3",
+    title: "Booking a Table at a Restaurant — a Real-Life Dialogue",
+    titleZh: "餐厅订位——一段真实场景对话",
+    speaker: "示例教材 · 生活对话",
+    source: "内置听力音频",
+    duration: "1:35",
+    durationSec: 95,
+    difficulty: "中级",
+    description:
+      "电话预订餐厅座位的对话，涵盖人数、时间、特殊要求等表达，语速适中，适合练习订餐场景。",
+    tags: ["travel", "culture"],
+    transcript: [
+      { start: 0, en: "Host: Good evening, thank you for calling The Olive Garden. How can I help you?", zh: "接线员：晚上好，感谢致电橄榄园餐厅，有什么可以帮您？" },
+      { start: 8, en: "Customer: Hi, I'd like to book a table for four tonight at seven.", zh: "顾客：你好，我想订今晚七点、四个人的位子。" },
+      { start: 16, en: "Host: Let me check... I'm sorry, seven is fully booked. How about seven thirty?", zh: "接线员：我看一下……抱歉，七点已经订满了，七点半可以吗？" },
+      { start: 26, en: "Customer: Seven thirty works. Do you have a table by the window?", zh: "顾客：七点半可以。有靠窗的位置吗？" },
+      { start: 33, en: "Host: Yes, we can arrange a window table for you.", zh: "接线员：有，我们可以给您安排靠窗的位置。" },
+      { start: 40, en: "Customer: Perfect. See you then!", zh: "顾客：太好了，到时候见！" },
+    ],
+    keyVocab: [
+      { expression: "book a table", meaning: "预订座位" },
+      { expression: "fully booked", meaning: "订满了" },
+      { expression: "a table by the window", meaning: "靠窗的位置" },
+    ],
+  },
+
+  // ================= 其他视频板块（other） =================
+  {
+    id: "other-learning",
     kind: "embed",
+    category: "other",
     provider: "youtube",
     embedId: "JsC9ZHi79jo",
     title: "The First 20 Hours — How to Learn Anything",
@@ -450,8 +705,9 @@ export const curriculum: CurriculumItem[] = [
     ],
   },
   {
-    id: "embed-ocean",
+    id: "other-ocean",
     kind: "embed",
+    category: "other",
     provider: "ted",
     embedId: "sylvia_earle_my_wish_protect_our_oceans",
     title: "My Wish: Protect Our Oceans",
