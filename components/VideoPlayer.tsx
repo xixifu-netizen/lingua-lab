@@ -1,22 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { videoTranscript } from "@/lib/mock-data";
 import SelectionCollector from "@/components/SelectionCollector";
+import {
+  curriculum,
+  embedUrlOf,
+  type CurriculumItem,
+  type TranscriptSegment,
+} from "@/lib/curriculum";
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5];
-const SEG_COUNT = videoTranscript.length;
-const TOTAL_SECONDS = 138; // 文稿时间轴总长（示例教材）
 
-type SourceKind = "url" | "file" | "youtube" | "bilibili";
-type VideoSource = { kind: SourceKind; value: string } | null;
+type LocalSource =
+  | { kind: "url" | "file"; value: string }
+  | { kind: "youtube" | "bilibili"; value: string }
+  | null;
 
 function fmt(sec: number) {
   const s = Math.max(0, Math.floor(sec));
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
-function parseSource(raw: string): { kind: SourceKind; value: string } | null {
+function parseSource(raw: string): LocalSource {
   const v = raw.trim();
   if (!v) return null;
   if (/youtu\.be\/|youtube\.com/i.test(v)) {
@@ -36,14 +41,17 @@ function parseSource(raw: string): { kind: SourceKind; value: string } | null {
 export default function VideoPlayer() {
   const [rate, setRate] = useState(1);
   const [playing, setPlaying] = useState(false);
-  const [elapsed, setElapsed] = useState(0); // 视频模式：真实播放秒数
+  const [elapsed, setElapsed] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [readIdx, setReadIdx] = useState(0); // 朗读模式：当前段
-  const [source, setSource] = useState<VideoSource>(null);
+  const [readIdx, setReadIdx] = useState(0);
+  const [activeItem, setActiveItem] = useState<CurriculumItem | null>(null);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [localSource, setLocalSource] = useState<LocalSource>(null);
   const [inputUrl, setInputUrl] = useState("");
   const [showSourcePanel, setShowSourcePanel] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
 
+  const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectUrlRef = useRef<string | null>(null);
@@ -52,55 +60,66 @@ export default function VideoPlayer() {
   const rateRef = useRef(rate);
   const playingRef = useRef(playing);
   const readIdxRef = useRef(readIdx);
-  const speechGenRef = useRef(0); // 朗读队列代号，用来作废过期的异步队列
+  const speechGenRef = useRef(0);
 
   rateRef.current = rate;
   playingRef.current = playing;
   readIdxRef.current = readIdx;
 
-  const isEmbed = source?.kind === "youtube" || source?.kind === "bilibili";
-  const hasVideo = source != null;
+  const transcript: TranscriptSegment[] =
+    activeItem?.transcript ?? curriculum[0].transcript;
+  const SEG_COUNT = transcript.length;
+  const TOTAL_SECONDS =
+    activeItem?.kind === "audio" || activeItem?.kind === "embed"
+      ? activeItem.durationSec
+      : curriculum[0].durationSec;
 
-  // ---------- 朗读模式：浏览器语音逐段朗读英文文稿 ----------
-  const queueSpeech = useCallback((fromIdx: number) => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    const synth = window.speechSynthesis;
-    const gen = ++speechGenRef.current;
-    synth.cancel();
-    // cancel 后立即 speak 在部分 Chrome 上会失效，稍作延迟更稳
-    window.setTimeout(() => {
-      if (gen !== speechGenRef.current || !playingRef.current) return;
-      const voices = synth.getVoices();
-      const enVoice = voices.find((v) => /^en([-_]|$)/i.test(v.lang));
-      videoTranscript.slice(fromIdx).forEach((seg, offset) => {
-        const idx = fromIdx + offset;
-        const u = new SpeechSynthesisUtterance(seg.en);
-        u.lang = "en-US";
-        u.rate = rateRef.current;
-        u.pitch = 1;
-        if (enVoice) u.voice = enVoice;
-        u.onstart = () => {
-          if (gen !== speechGenRef.current || !playingRef.current) return;
-          setReadIdx(idx);
-        };
-        if (idx === SEG_COUNT - 1) {
-          u.onend = () => {
-            if (gen === speechGenRef.current && playingRef.current) setPlaying(false);
+  const isLocalVideo = localSource?.kind === "url" || localSource?.kind === "file";
+  const isLocalEmbed = localSource?.kind === "youtube" || localSource?.kind === "bilibili";
+  const isBuiltinAudio = activeItem?.kind === "audio";
+  const isBuiltinEmbed = activeItem?.kind === "embed";
+  const hasReadableProgress = isBuiltinAudio || isLocalVideo;
+
+  const queueSpeech = useCallback(
+    (fromIdx: number) => {
+      if (typeof window === "undefined" || !window.speechSynthesis) return;
+      const synth = window.speechSynthesis;
+      const gen = ++speechGenRef.current;
+      synth.cancel();
+      window.setTimeout(() => {
+        if (gen !== speechGenRef.current || !playingRef.current) return;
+        const voices = synth.getVoices();
+        const enVoice = voices.find((v) => /^en([-_]|$)/i.test(v.lang));
+        transcript.slice(fromIdx).forEach((seg, offset) => {
+          const idx = fromIdx + offset;
+          const u = new SpeechSynthesisUtterance(seg.en);
+          u.lang = "en-US";
+          u.rate = rateRef.current;
+          u.pitch = 1;
+          if (enVoice) u.voice = enVoice;
+          u.onstart = () => {
+            if (gen !== speechGenRef.current || !playingRef.current) return;
+            setReadIdx(idx);
           };
-        }
-        synth.speak(u);
-      });
-    }, 60);
-  }, []);
+          if (idx === SEG_COUNT - 1) {
+            u.onend = () => {
+              if (gen === speechGenRef.current && playingRef.current) setPlaying(false);
+            };
+          }
+          synth.speak(u);
+        });
+      }, 60);
+    },
+    [transcript, SEG_COUNT]
+  );
 
   const stopSpeech = useCallback(() => {
-    speechGenRef.current++; // 作废尚未执行的异步队列
+    speechGenRef.current++;
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
   }, []);
 
-  // 卸载时清理语音与本地文件 URL
   useEffect(() => {
     return () => {
       stopSpeech();
@@ -108,19 +127,76 @@ export default function VideoPlayer() {
     };
   }, [stopSpeech]);
 
-  // 倍速变化时：视频直接改 playbackRate；朗读则重建当前段起的队列
   useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = rate;
     if (videoRef.current) videoRef.current.playbackRate = rate;
   }, [rate]);
 
-  useEffect(() => {
-    // 改倍速时，若正在朗读则按新语速从当前段重建队列
-    if ((!hasVideo || isEmbed) && playing) queueSpeech(readIdxRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rate]);
+  function selectBuiltin(item: CurriculumItem) {
+    stopSpeech();
+    releaseObjectUrl();
+    setLocalSource(null);
+    setPlaying(false);
+    setElapsed(0);
+    setReadIdx(0);
+    setDuration(0);
+    setActiveItem(item);
+    setSourceError(null);
+    setShowLibrary(false);
+  }
+
+  function selectLocal(src: LocalSource) {
+    stopSpeech();
+    setActiveItem(null);
+    setLocalSource(src);
+    setPlaying(false);
+    setElapsed(0);
+    setReadIdx(0);
+    setDuration(0);
+    setSourceError(null);
+  }
+
+  function releaseObjectUrl() {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+  }
+
+  function loadUrl() {
+    const parsed = parseSource(inputUrl);
+    if (!parsed) {
+      setSourceError("没识别出可用链接，请粘贴 .mp4/.webm 直链，或 YouTube / B 站视频网址。");
+      return;
+    }
+    releaseObjectUrl();
+    selectLocal(parsed);
+    setShowSourcePanel(false);
+  }
+
+  function loadFile(file: File | undefined) {
+    if (!file) return;
+    releaseObjectUrl();
+    const url = URL.createObjectURL(file);
+    objectUrlRef.current = url;
+    selectLocal({ kind: "file", value: url });
+    setShowSourcePanel(false);
+  }
+
+  function removeSource() {
+    stopSpeech();
+    releaseObjectUrl();
+    setLocalSource(null);
+    setActiveItem(null);
+    setInputUrl("");
+    setPlaying(false);
+    setElapsed(0);
+    setReadIdx(0);
+    setDuration(0);
+  }
 
   function togglePlay() {
-    if (hasVideo && !isEmbed && videoRef.current) {
+    if (isLocalVideo && videoRef.current) {
       const v = videoRef.current;
       if (v.paused) {
         void v.play();
@@ -133,8 +209,20 @@ export default function VideoPlayer() {
       }
       return;
     }
-    if (isEmbed) {
-      // 嵌入视频由 iframe 自带控制条，这里只切换文稿朗读
+    if (isBuiltinAudio && audioRef.current) {
+      const a = audioRef.current;
+      if (a.paused) {
+        void a.play();
+        playingRef.current = true;
+        setPlaying(true);
+      } else {
+        a.pause();
+        playingRef.current = false;
+        setPlaying(false);
+      }
+      return;
+    }
+    if (isBuiltinEmbed || isLocalEmbed) {
       if (playing) {
         stopSpeech();
         playingRef.current = false;
@@ -146,7 +234,6 @@ export default function VideoPlayer() {
       }
       return;
     }
-    // 朗读模式
     if (playing) {
       stopSpeech();
       playingRef.current = false;
@@ -161,11 +248,17 @@ export default function VideoPlayer() {
   }
 
   function replay() {
-    if (hasVideo && !isEmbed && videoRef.current) {
+    if (isLocalVideo && videoRef.current) {
       videoRef.current.currentTime = 0;
       void videoRef.current.play();
       setElapsed(0);
-      playingRef.current = true;
+      setPlaying(true);
+      return;
+    }
+    if (isBuiltinAudio && audioRef.current) {
+      audioRef.current.currentTime = 0;
+      void audioRef.current.play();
+      setElapsed(0);
       setPlaying(true);
       return;
     }
@@ -178,9 +271,15 @@ export default function VideoPlayer() {
   }
 
   function seek(p: number) {
-    if (hasVideo && !isEmbed && videoRef.current && duration > 0) {
-      videoRef.current.currentTime = (p / 100) * duration;
-      setElapsed((p / 100) * duration);
+    if (hasReadableProgress && duration > 0) {
+      const t = (p / 100) * duration;
+      if (audioRef.current) {
+        audioRef.current.currentTime = t;
+        setElapsed(t);
+      } else if (videoRef.current) {
+        videoRef.current.currentTime = t;
+        setElapsed(t);
+      }
       return;
     }
     const idx = Math.min(SEG_COUNT - 1, Math.round((p / 100) * (SEG_COUNT - 1)));
@@ -189,10 +288,15 @@ export default function VideoPlayer() {
 
   function jumpToSegment(idx: number) {
     setReadIdx(idx);
-    if (hasVideo && !isEmbed && videoRef.current && duration > 0) {
-      const t = (videoTranscript[idx].start / TOTAL_SECONDS) * duration;
-      videoRef.current.currentTime = t;
-      setElapsed(t);
+    if (hasReadableProgress && duration > 0) {
+      const t = (transcript[idx].start / TOTAL_SECONDS) * duration;
+      if (audioRef.current) {
+        audioRef.current.currentTime = t;
+        setElapsed(t);
+      } else if (videoRef.current) {
+        videoRef.current.currentTime = t;
+        setElapsed(t);
+      }
       return;
     }
     if (playing) {
@@ -201,94 +305,98 @@ export default function VideoPlayer() {
     }
   }
 
-  // ---------- 视频源 ----------
-  function releaseObjectUrl() {
-    if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-    }
-  }
-
-  function applySource(next: VideoSource) {
-    stopSpeech();
-    setPlaying(false);
-    setElapsed(0);
-    setReadIdx(0);
-    setDuration(0);
-    setSource(next);
-    setSourceError(null);
-  }
-
-  function loadUrl() {
-    const parsed = parseSource(inputUrl);
-    if (!parsed) {
-      setSourceError("没识别出可用链接，请粘贴 .mp4/.webm 直链，或 YouTube / B 站视频网址。");
-      return;
-    }
-    releaseObjectUrl(); // 链接源不需要旧的本地文件 URL
-    applySource(parsed);
-    setShowSourcePanel(false);
-  }
-
-  function loadFile(file: File | undefined) {
-    if (!file) return;
-    releaseObjectUrl(); // 先释放上一个本地文件
-    const url = URL.createObjectURL(file);
-    objectUrlRef.current = url;
-    applySource({ kind: "file", value: url });
-    setShowSourcePanel(false);
-    setSourceError(null);
-  }
-
-  function removeSource() {
-    releaseObjectUrl();
-    applySource(null);
-    setInputUrl("");
-  }
-
-  // 文稿高亮：
-  // - 直链/本地视频：把真实播放进度按比例映射到示例文稿时间轴，全程同步
-  // - 朗读/嵌入视频：按当前朗读段索引
   const mappedTime =
-    hasVideo && !isEmbed && duration > 0
+    hasReadableProgress && duration > 0
       ? (elapsed / duration) * TOTAL_SECONDS
       : elapsed;
-  const activeIdx =
-    hasVideo && !isEmbed
-      ? videoTranscript.reduce((acc, seg, i) => (seg.start <= mappedTime ? i : acc), 0)
-      : readIdx;
+  const activeIdx = hasReadableProgress
+    ? transcript.reduce((acc, seg, i) => (seg.start <= mappedTime ? i : acc), 0)
+    : readIdx;
 
   useEffect(() => {
     if (!playing && activeIdx === 0) return;
     activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [activeIdx, playing]);
 
-  const progress = hasVideo
+  const progress = hasReadableProgress
     ? duration > 0
       ? (elapsed / duration) * 100
       : 0
-    : (readIdx / (SEG_COUNT - 1)) * 100;
+    : (readIdx / Math.max(1, SEG_COUNT - 1)) * 100;
 
-  const embedUrl =
-    source?.kind === "youtube"
-      ? `https://www.youtube.com/embed/${source.value}`
-      : source?.kind === "bilibili"
-        ? `https://player.bilibili.com/player.html?bvid=${source.value}&high_quality=1`
+  function modeLabel() {
+    if (isBuiltinAudio) return "🎧 内置音频 · 自动同步";
+    if (isBuiltinEmbed) return "🎬 视频嵌入 · 点击定位";
+    if (isLocalVideo) return "🎬 本地视频 · 自动同步";
+    if (isLocalEmbed) return "🎬 嵌入视频 · 点击定位";
+    return "🔊 AI 朗读文稿";
+  }
+
+  const localEmbedUrl =
+    localSource?.kind === "youtube"
+      ? `https://www.youtube.com/embed/${localSource.value}`
+      : localSource?.kind === "bilibili"
+        ? `https://player.bilibili.com/player.html?bvid=${localSource.value}&high_quality=1`
         : "";
+
+  const builtinEmbedUrl = isBuiltinEmbed ? embedUrlOf(activeItem!) : "";
 
   return (
     <div className="rounded-2xl border border-line overflow-hidden bg-parchment">
       <div className="flex items-center justify-between px-4 py-2 border-b border-line bg-white/60">
-        <span className="text-[0.75rem] font-medium text-ink">
-          {hasVideo ? (isEmbed ? "🎬 嵌入视频" : "🎬 真实视频播放") : "🔊 AI 朗读文稿"}
-        </span>
-        <button
-          onClick={() => setShowSourcePanel((s) => !s)}
-          className="text-[0.72rem] text-sage-deep hover:underline"
-        >
-          {showSourcePanel ? "收起设置" : hasVideo ? "更换视频源" : "添加我自己的视频"}
-        </button>
+        <span className="text-[0.75rem] font-medium text-ink">{modeLabel()}</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowLibrary((s) => !s)}
+            className="text-[0.72rem] text-sage-deep hover:underline"
+          >
+            {showLibrary ? "收起素材库" : "🎬 选择素材"}
+          </button>
+          <button
+            onClick={() => setShowSourcePanel((s) => !s)}
+            className="text-[0.72rem] text-sage-deep hover:underline"
+          >
+            {showSourcePanel ? "收起设置" : "添加我的视频"}
+          </button>
+        </div>
       </div>
+
+      {showLibrary && (
+        <div className="px-4 py-3 bg-white/70 border-b border-line">
+          <p className="text-[0.72rem] text-ink-soft mb-2">
+            内置精选素材：音频可随播放自动高亮文稿；视频（TED / YouTube）嵌入播放，文稿点击定位。
+          </p>
+          <div className="grid sm:grid-cols-2 gap-2">
+            {curriculum.map((item) => {
+              const isActive = activeItem?.id === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => selectBuiltin(item)}
+                  className={`text-left rounded-lg border p-3 transition-colors ${
+                    isActive
+                      ? "border-sage bg-sage-soft/50"
+                      : "border-line bg-white hover:border-sage/50"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-[0.85rem]">{item.kind === "audio" ? "🎧" : "🎬"}</span>
+                    <span className="text-[0.78rem] font-medium text-ink leading-snug flex-1">
+                      {item.titleZh}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[0.68rem] text-ink-soft">
+                    {item.source} · {item.duration} · {item.difficulty}
+                  </div>
+                  <div className="mt-1 text-[0.68rem] text-ink-soft/70">
+                    {item.kind === "audio" ? "自动高亮文稿" : "点击定位文稿"}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {showSourcePanel && (
         <div className="px-4 py-3 bg-white/70 border-b border-line space-y-2">
@@ -317,7 +425,7 @@ export default function VideoPlayer() {
             >
               上传本地视频
             </button>
-            {hasVideo && (
+            {(localSource || activeItem) && (
               <button
                 onClick={removeSource}
                 className="px-3 py-1.5 rounded-lg text-[0.75rem] text-clay-deep hover:bg-clay-soft"
@@ -333,20 +441,79 @@ export default function VideoPlayer() {
             className="hidden"
             onChange={(e) => loadFile(e.target.files?.[0])}
           />
-          {sourceError && (
-            <p className="text-[0.72rem] text-clay-deep">{sourceError}</p>
-          )}
+          {sourceError && <p className="text-[0.72rem] text-clay-deep">{sourceError}</p>}
+        </div>
+      )}
+
+      {activeItem && (
+        <div className="px-4 py-2.5 border-b border-line bg-sage-soft/20 flex items-start gap-2">
+          <div className="flex-1">
+            <div className="text-[0.8rem] font-medium text-ink">{activeItem.title}</div>
+            <div className="text-[0.7rem] text-ink-soft mt-0.5">{activeItem.description}</div>
+          </div>
+          <div className="flex flex-wrap gap-1 shrink-0">
+            {activeItem.tags.map((t) => (
+              <span key={t} className="px-2 py-0.5 rounded-full bg-parchment text-[0.66rem] text-ink-soft">
+                {t}
+              </span>
+            ))}
+          </div>
         </div>
       )}
 
       <div className="grid md:grid-cols-2">
-        {/* 左侧：画面 / 朗读字幕 + 控制条 */}
         <div className="border-b md:border-b-0 md:border-r border-line">
           <div className="aspect-video bg-ink/90 relative flex items-center justify-center overflow-hidden">
-            {source?.kind === "url" || source?.kind === "file" ? (
+            {isBuiltinAudio && (
+              <>
+                <audio
+                  ref={audioRef}
+                  src={activeItem!.audioUrl}
+                  preload="metadata"
+                  onLoadedMetadata={(e) => {
+                    const d = e.currentTarget.duration;
+                    if (Number.isFinite(d)) setDuration(d);
+                    e.currentTarget.playbackRate = rateRef.current;
+                  }}
+                  onTimeUpdate={(e) => setElapsed(e.currentTarget.currentTime)}
+                  onPlay={() => setPlaying(true)}
+                  onPause={() => setPlaying(false)}
+                  onEnded={() => setPlaying(false)}
+                  onError={() =>
+                    setSourceError("音频加载失败：链接可能已失效。可改用右上角「AI 朗读」或选择其他素材。")
+                  }
+                />
+                <div className="w-full h-full flex flex-col items-center justify-center text-center px-8">
+                  <div className="w-14 h-14 rounded-full bg-sage-soft/30 flex items-center justify-center mb-3">
+                    <span className="text-[1.35rem]">{playing ? "🔊" : "🎧"}</span>
+                  </div>
+                  <p className="text-[0.7rem] text-cream/60 mb-2">
+                    第 {activeIdx + 1} / {SEG_COUNT} 段
+                  </p>
+                  <p className="text-[0.92rem] leading-relaxed text-cream font-medium max-w-md">
+                    {transcript[activeIdx].en}
+                  </p>
+                  <p className="text-[0.72rem] text-cream/60 mt-2 leading-relaxed max-w-md">
+                    {transcript[activeIdx].zh}
+                  </p>
+                </div>
+              </>
+            )}
+
+            {isBuiltinEmbed && (
+              <iframe
+                src={builtinEmbedUrl}
+                className="w-full h-full"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
+                allowFullScreen
+                title={activeItem!.title}
+              />
+            )}
+
+            {isLocalVideo && (
               <video
                 ref={videoRef}
-                src={source.value}
+                src={localSource!.value}
                 className="w-full h-full object-contain"
                 playsInline
                 onLoadedMetadata={(e) => {
@@ -362,15 +529,19 @@ export default function VideoPlayer() {
                   setSourceError("视频加载失败：链接可能已失效，或该地址不允许跨域播放。")
                 }
               />
-            ) : isEmbed ? (
+            )}
+
+            {isLocalEmbed && (
               <iframe
-                src={embedUrl}
+                src={localEmbedUrl}
                 className="w-full h-full"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
                 allowFullScreen
                 title="学习视频"
               />
-            ) : (
+            )}
+
+            {!activeItem && !localSource && (
               <div className="w-full h-full flex flex-col items-center justify-center text-center px-8">
                 <div className="w-14 h-14 rounded-full bg-sage-soft/30 flex items-center justify-center mb-3">
                   <span className="text-[1.35rem]">{playing ? "🔊" : "🎧"}</span>
@@ -379,14 +550,15 @@ export default function VideoPlayer() {
                   英文文稿朗读 · 第 {readIdx + 1} / {SEG_COUNT} 段
                 </p>
                 <p className="text-[0.92rem] leading-relaxed text-cream font-medium max-w-md">
-                  {videoTranscript[readIdx].en}
+                  {transcript[readIdx].en}
                 </p>
                 <p className="text-[0.7rem] text-cream/50 mt-3 leading-relaxed">
-                  用浏览器语音朗读示例文稿，点播放即可听；也可在右上角换成你自己的视频。
+                  点播放用浏览器语音朗读；或点上方「选择素材」挑一个内置音频/视频。
                 </p>
               </div>
             )}
-            {playing && !isEmbed && (
+
+            {playing && !isBuiltinEmbed && !isLocalEmbed && (
               <span className="absolute top-3 right-3 flex items-center gap-1.5 text-[0.7rem] text-cream/80">
                 <span className="w-2 h-2 rounded-full bg-sage animate-pulse" />
                 {rate}×
@@ -397,7 +569,7 @@ export default function VideoPlayer() {
           <div className="px-4 pb-4 pt-3 bg-white/60">
             <div className="flex items-center gap-2">
               <span className="text-[0.72rem] text-ink-soft tabular-nums w-10">
-                {hasVideo && !isEmbed ? fmt(elapsed) : `第${readIdx + 1}段`}
+                {hasReadableProgress ? fmt(elapsed) : `第${activeIdx + 1}段`}
               </span>
               <input
                 type="range"
@@ -408,7 +580,7 @@ export default function VideoPlayer() {
                 className="flex-1 h-1.5 accent-sage cursor-pointer"
               />
               <span className="text-[0.72rem] text-ink-soft tabular-nums w-10 text-right">
-                {hasVideo && !isEmbed && duration > 0 ? fmt(duration) : fmt(TOTAL_SECONDS)}
+                {hasReadableProgress && duration > 0 ? fmt(duration) : fmt(TOTAL_SECONDS)}
               </span>
             </div>
             <div className="mt-2.5 flex items-center justify-between flex-wrap gap-3">
@@ -446,19 +618,16 @@ export default function VideoPlayer() {
           </div>
         </div>
 
-        {/* 右侧：同步文稿 */}
         <div className="bg-white/70">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-line">
             <span className="text-[0.78rem] font-medium text-ink">📜 同步文稿</span>
-            <span className="text-[0.7rem] text-ink-soft">
-              点段落跳转 · 划选可收藏
-            </span>
+            <span className="text-[0.7rem] text-ink-soft">点段落跳转 · 划选可收藏</span>
           </div>
           <div
             ref={contentRef}
             className="h-[320px] md:h-[340px] overflow-y-auto px-4 py-3 space-y-2.5"
           >
-            {videoTranscript.map((seg, i) => {
+            {transcript.map((seg, i) => {
               const active = i === activeIdx;
               return (
                 <div
@@ -485,6 +654,15 @@ export default function VideoPlayer() {
                   >
                     {seg.en}
                   </span>
+                  {seg.zh && (
+                    <span
+                      className={`block mt-0.5 pl-8 text-[0.76rem] leading-relaxed ${
+                        active ? "text-ink-soft" : "text-ink-soft/50"
+                      }`}
+                    >
+                      {seg.zh}
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -492,10 +670,10 @@ export default function VideoPlayer() {
         </div>
       </div>
 
-      {isEmbed && (
+      {(isBuiltinEmbed || isLocalEmbed) && (
         <p className="px-4 py-2 text-[0.7rem] text-ink-soft border-t border-line bg-white/60">
           嵌入视频由站点自带控制条播放，浏览器无法读取其播放进度，文稿可点击段落手动定位；
-          若需要自动同步，请改用 .mp4 直链或上传本地视频文件。
+          若需要自动同步，请选择「🎧 音频素材」或上传本地视频文件。
         </p>
       )}
       {sourceError && !showSourcePanel && (
@@ -504,8 +682,7 @@ export default function VideoPlayer() {
         </p>
       )}
       <p className="px-4 py-2 text-[0.69rem] text-ink-soft/70 border-t border-line bg-white/50">
-        文稿为示例教材（习惯主题）。换成你自己的视频后，可点右侧段落手动校准进度。
-        {hasVideo && !isEmbed && ` 当前视频时长 ${fmt(duration)}，文稿时间轴 ${fmt(TOTAL_SECONDS)}。`}
+        文稿为内置示例教材。选择内置音频可自动高亮；选择视频可手动点击定位；也可右上角换成你自己的视频。
       </p>
 
       <SelectionCollector containerRef={contentRef} />
